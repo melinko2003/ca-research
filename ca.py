@@ -11,21 +11,24 @@ class KeyHandler:
     ''' Handles Key Related Operations '''
     @staticmethod
     def generate_rsa_key():
+        ''' Create a RSA Key to Sign a Certificate '''
         return rsa.generate_private_key(public_exponent=65537, key_size=4096)
 
     @staticmethod
     def generate_ec_key():
+        ''' Create a EC Key to Sign a Certificate '''
         return ec.generate_private_key(curve=ec.SECP256R1())
 
     # Candidate for removal
-    def sign_certificate(self, private_key, certificate):
-        return certificate.sign(private_key, hashes.SHA256())
+    # def sign_certificate(self, private_key, certificate):
+    #     return certificate.sign(private_key, hashes.SHA256())
 
 
 class CertificateHandler:
     ''' Handles Certificate Creation '''
     @staticmethod
     def create_certificate(subject, issuer, public_key, private_key, is_ca=False):
+        ''' Creates the certificate '''        
         subjected = x509.Name(
             [x509.NameAttribute(NameOID.COMMON_NAME, subject)]
             ) if isinstance(subject, str) else subject
@@ -49,10 +52,12 @@ class CertificateHandler:
 class SpecialCertificateHandler(CertificateHandler):
     ''' Acts as a container for Certificate Operations '''
     def create_crl(self):
+        ''' Still need to implement CRL '''   
         # Implement your CRL logic here
         pass
 
     def create_root(self, name, key_type="RSA"):
+        ''' Creates a Root certificate '''   
         if key_type == "RSA":
             key = KeyHandler.generate_rsa_key()
         else:
@@ -62,6 +67,7 @@ class SpecialCertificateHandler(CertificateHandler):
         return key, cert
 
     def create_intermediate(self, root_key, root_cert, name, key_type="RSA"):
+        ''' Creates a Intermediate certificate '''   
         if key_type == "RSA":
             print('creating rsa key')
             key = KeyHandler.generate_rsa_key()
@@ -77,6 +83,7 @@ class SpecialCertificateHandler(CertificateHandler):
         return key, cert
 
     def create_cross_sign(self, to_be_signed_key, to_be_signed_cert, signer_key, signer_name):
+        ''' Creates a Cross Sign certificate ''' 
         cert = self.create_certificate(to_be_signed_cert.subject,
                                        signer_name,
                                        to_be_signed_key.public_key(),
@@ -84,6 +91,7 @@ class SpecialCertificateHandler(CertificateHandler):
         return cert
 
     def create_leaf(self, issuer_key, issuer_cert, name, key_type="RSA"):
+        ''' Creates a Leaf certificate ''' 
         if key_type == "RSA":
             key = KeyHandler.generate_rsa_key()
         else:
@@ -99,21 +107,37 @@ class BoilerPlatePKI:
         self.handler = SpecialCertificateHandler()
 
     def run(self):
+        ''' Creates a Set of Certificate Chains ''' 
         rsa_root_key, rsa_root_cert = self.handler.create_root("RSA 4096 Root")
         ec_root_key, ec_root_cert = self.handler.create_root("EC Root", key_type="EC")
 
-        rsa_inter_key, rsa_inter_cert = self.handler.create_intermediate(rsa_root_key, rsa_root_cert, "RSA 4096 Intermediate")
-        ec_inter_key, ec_inter_cert = self.handler.create_intermediate(ec_root_key, ec_root_cert, "EC Intermediate", key_type="EC")
+        rsa_inter_key, rsa_inter_cert = self.handler.create_intermediate(
+            rsa_root_key, rsa_root_cert, "RSA 4096 Intermediate")
 
-        rsa_leaf_key, rsa_leaf_cert = self.handler.create_leaf(rsa_inter_key, rsa_inter_cert, "RSA 4096 Leaf")
-        ec_leaf_key, ec_leaf_cert = self.handler.create_leaf(ec_inter_key, ec_inter_cert, "EC Leaf", key_type="EC")
+        ec_inter_key, ec_inter_cert = self.handler.create_intermediate(
+            ec_root_key, ec_root_cert, "EC Intermediate", key_type="EC")
 
-        print(rsa_inter_cert.subject)
-        rsa_cross1 = self.handler.create_cross_sign(rsa_inter_key, rsa_inter_cert, ec_root_key, ec_root_cert.subject)
-        rsa_cross2 = self.handler.create_cross_sign(rsa_inter_key, rsa_inter_cert, ec_inter_key, ec_inter_cert.subject)
-        print(ec_inter_cert.subject)
-        ec_cross1 = self.handler.create_cross_sign(ec_inter_key, ec_inter_cert, rsa_root_key, rsa_root_cert.subject)
-        ec_cross2 = self.handler.create_cross_sign(ec_inter_key, ec_inter_cert, rsa_inter_key, rsa_inter_cert.subject)
+        rsa_leaf_key, rsa_leaf_cert = self.handler.create_leaf(
+            rsa_inter_key, rsa_inter_cert, "RSA 4096 Leaf")
+
+        ec_leaf_key, ec_leaf_cert = self.handler.create_leaf(
+            ec_inter_key, ec_inter_cert, "EC Leaf", key_type="EC")
+
+        # Create rsa_root_cross.pem
+        rsa_cross1 = self.handler.create_cross_sign(
+            rsa_inter_key, rsa_inter_cert, ec_root_key, ec_root_cert.subject)
+
+        # Create rsa_intermediate_cross.pem
+        rsa_cross2 = self.handler.create_cross_sign(
+            rsa_inter_key, rsa_inter_cert, ec_inter_key, ec_inter_cert.subject)
+
+        # Create ec_root_cross.pem
+        ec_cross1 = self.handler.create_cross_sign(
+            ec_inter_key, ec_inter_cert, rsa_root_key, rsa_root_cert.subject)
+
+        # Create ec_intermediate_cross.pem
+        ec_cross2 = self.handler.create_cross_sign(
+            ec_inter_key, ec_inter_cert, rsa_inter_key, rsa_inter_cert.subject)
 
         # Write assets to the filesystem
         self._write_to_file("rsa_root.pem", rsa_root_cert)
